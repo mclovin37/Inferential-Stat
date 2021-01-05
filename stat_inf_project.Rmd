@@ -1,0 +1,252 @@
+---
+title: "Statistical inference with the GSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+### Project by Alex Genove. Email: wadewatts37@gmail.com. 
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.align='center', message = FALSE, warning=FALSE, fig.height = 5)
+
+margin.tbl <- function(data, factor.x, factor.y) {
+    library(tidyr)
+    library(dplyr)
+    table <- data %>% 
+        tbl_df %>%
+        group_by_(factor.x, factor.y) %>%  
+        summarize(n = n())
+    table <- spread_(table, names(table)[2], "n") %>%
+        ungroup
+    table[,1] <- as.character(table[[1]])
+    bottom <- colSums(table[,2:length(table)])
+    bottom <- data.frame("Total",as.list(bottom))
+    bottom[,1] <- as.character(bottom[,1])
+    names(bottom) <- names(table)
+    table <- rbind(table, bottom) 
+    side <- rowSums(table[,-1])
+    names(table)[1] <- "Groups"
+    table <- table %>% mutate(Total = side)
+    return(table)
+}
+
+prop.tbl <- function(margin_tbl) {
+ table <- margin_tbl
+ ncol <- ncol(table)
+ for (row in 1:nrow(table)) {
+     for(col in 1:ncol(table)) {
+         if (col == 1) {
+         }
+         else {
+            table[row,col] <- table[row,col]/table[row,ncol] 
+         }
+    }
+     
+ }
+ return(table)
+}
+```
+
+## Part 1: Introduction to the Data
+
+The General Social Survey (GSS) is a survey of American adults that records demographic information and attitudes towards various social and political issues. The GSS primarily involves face-to-face interviews by professional interviewers of persons living in US households. Over the years, multiple sample designs were used. The two most common designs are full probability random sampling and block quota sampling, a form of stratified random sampling. During sampling, one adult is randomly selected from each sampled household. In addition, the GSS uses large, clearly defined sampling frames that are updated over time so the survey targets a well-defined population that is representative of the target population of US adults. 
+
+Thanks to these design choices, the GSS claims that its samples closely resemble US population distributions as reported in the Census. However, survey non-response, sampling variation, and various other factors can cause the GSS sample to deviate from known population figures for some variables. For example, various sampling frames and methods have underrepresented adult males, certain races, and religious groups in some years. Thus, any conclusions drawn from the data are mostly generalizable to US adults with the caveat that there are lingering uncertainties for the external validity of the survey data.
+
+The survey does not involve random assignment of respondents to the factors under consideration. In addition, the survey is not an experiment or observational study, and, thus, there are limitations to what sort of conclusions can be drawn from the data. Any identified associations will be complicated by lurking variables and bias, both measured in the survey and from unmeasured sources. It is impossible to rule out other confounding factors that may affect any discovered associations between the measured variables. Therefore, no causality can be determined from inference on this data, only evidence of for strong associations. Such relationships are useful for hypothesis formation for the design of future studies that can establish causality. Moreover, the relationships present in this data are informative about real world opinions and demographic information to get a glimpse of social features of the US population.
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(tidyr)
+library(pander)
+library(pwr)
+library(ggplot2)
+library(dplyr)
+library(statsr)
+```
+
+### Load data
+
+```{r load-data}
+load("be3_gss.Rdata")
+```
+
+* * *
+
+## Part 2: Research question
+From 1972-2012, does a different proportion of US adults, who reported living with families with below average incomes when they were sixteen, report an above average income today if they earned any college degree than if they did not earn any college degree?
+
+<i>Relevance:</i> Economic mobility is a measure of how difficult it is for members of the lowest socioeconomic status to move up to higher status in their lifetime. There are many reasons to be concerned with measures of mobility for analyzing the functioning of a society. High mobility may be desired for those who wish their society to be truly meritocratic, such that how much money one starts with does not change their chance of moving up in socioeconomic status. In addition, from a moral perspective, high mobility may indicate a society successfully provides for its poor. One of the factors suggested to increase mobility is education. In the US, a college education is seen as necessary to make a better living. This question addresses the potential impact of education for individuals that come from poor families to see what impact, if any, a college education may have on future socioeconomic status.
+
+
+### Create relevent variables
+The following code creates factor variables that will be used to address the question:
+```{r data-cleaning}
+# Select only relevent variables and make sure all rows have data for each variable
+study <- gss %>% select(degree, incom16, finrela)
+study <- study[complete.cases(study),]
+
+# Filter for only respondents with below average family income when they were 16, and mutate the data frame to add the new variables
+study <- study %>%
+    filter(incom16 == "Below Average" | incom16 == "Far Below Average") %>%
+    mutate(college = ifelse((degree == "Lt High School" | degree == "High School"), "No College Degree", "College Degree"), income_today = ifelse((finrela == "Far Above Average" | finrela == "Above Average"), "Above Average", "Not Above Average"))
+study$college <- factor(study$college)
+study$income_today <- factor(study$income_today)
+# Select the new variables only
+study <- droplevels(study) %>% select(college,income_today)
+# Take a glimpse of the data
+glimpse(study)
+```
+The resulting data frame has 13,171 observations and 2 variables. The variable, `college` is a two level categorical variable that indicates whether the respondent earned some level of college degree, or not. The variable, `income_today` is a two level categorical variable that indicates whether the respondent reports having an above average or far above average income today.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+The variables under consideration are both categorical variables. Thus, the exploratory data analysis begins by making a marginal contingency table and proportional contingency table using the custom functions, `margin.tbl` and `prop.tbl` (to see the full code for these functions, go to Appendix A). 
+
+```{r margin-table, results = "asis"}
+# Create and print the marginal contingency table as a data frame
+pandoc.table(margin.tbl(study, ~college, ~income_today))
+# Create and print the proportional contingency table as a data frame
+pandoc.table(prop.tbl(margin.tbl(study, ~college, ~income_today)))
+```
+Each table gives a summary of the number of respondents in each combination of categories, both as counts in the first table, and as proportions of the explanatory variable, `college`, in the second. The research question is primarily concerned with the relative amounts of respondents that reported an above average income today if they earn any college degree or not. It is clear that a minority of those who report coming from a poor family actually earned a college degree. However, of those in the GSS survey that did earn a college degree, about 35.1% of them currently report an above average income versus 9.7% who report an above average income and did not earn a college degree.
+
+The difference in proportion is visualized with a plot:
+
+```{r proportion-chart}
+# Use ggplot to plot the difference in proportions between those who earned a college degree and those who did not
+ggplot(study, aes(x = college, fill = income_today)) + 
+    geom_bar(position = "fill") +
+    scale_y_continuous(labels = c("0%", "25%", "50%", "75%", "100%")) +
+    labs(title = "Proportion of US Adults Raised in Below Average Income Families' \n Present Income by Education Level", y = "% Adults in Each Present Income Category", x = "Education Level", fill = "Present Income") +
+    theme(plot.title = element_text(hjust = 0.5))
+```
+The bar chart clearly shows the 25.5% difference in the proportion of adults who have a college degree and report an above average income versus the the proportion of adults who do not have a college degree and report an above average income in the GSS survey. This difference suggests that having a college education is associated with reporting an above average income. The analysis will proceed with hypothesis testing to determine the statistical significance of this possible association. 
+
+
+* * *
+
+## Part 4: Inference
+
+The next step is to evaluate the data for the necessary conditions for a valid inferential analysis. The proper method for conducting an inferential analysis for two categorical variables with two levels each is a two-sample z-test for population proportions. The two-sample z-test for proportions determines the statistical significance of the difference in proportions of adults reporting above average income between those who earned a college degree versus those who did not. The test works by assuming the proportions present in the data reflect the actual proportion of US adults with above average income and college degrees or not in the US population. The z-test proceeds by calculating whether the differences in the sample proportions in the data could have arisen by chance if the proportions with each combination of characteristic are actually equal to each other in the population i.e. if having an above average income actually is independent of having a college education for US adults who came from poor families.  
+
+The first condition needed for a valid two-sample z-test is the data must represent random samples, or, specifically, independent, identically distributed (IID) variables. Each observation in the data set represents a single, unique adult, and all other knowledge of the sampling procedure suggests that each sample is independent of each other. In addition, the survey population of all US adults is at least 10-20 times larger than the sample size. These assumptions ensure that each adult in the data represents IID samples.
+
+The second condition needed for a valid two-sample z-test is the sampling distribution of the proportion under consideration in both sample populations must be normal. For proportions, the rule that satisfies this condition is that the number of successes and the number of failures are each at least 10 in each of the samples. In this case, the number of successes are 877 and 1036 adults, and the number of failures are 1615 and 9643 adults, meeting this requirement.
+
+The exploratory analysis did identify a potential positive association between having a college degree and having above average income, however, the two sample z-test for proportions will be two-sided to address the more general research question determining any difference between the two proportions. Thus, each hypothesis test will take the following form for the null and alternative hypotheses: \[H_0:\hat{p}_1-\hat{p}_2 = 0\] \[H_a:\hat{p}_1-\hat{p}_2 \neq 0\]
+
+The following code details the calculations for the hypothesis test for the above hypotheses. The code outputs the difference in proportions, the confidence interval for the difference in proportions, the z-statistic, p-value, and also calculates relative risk ratio for another way to view the difference in proportions.
+```{r result}
+# Two-sided hypothesis test for two proprotions (unpaired)
+# Enter the counts for each group and add 1 or 2 using the "plus four" method
+prop1 <- 877+1
+tot1 <- 2492+2
+prop2 <- 1036+1
+tot2 <- 10679+2
+phat1 <- prop1/tot1
+phat2 <- prop2/tot2
+# Calculate p diff
+pdiff <- phat1-phat2
+# Calculate SE
+n1 <- tot1
+n2 <- tot2
+SE <- sqrt(((((phat1)*(1-phat1))/(n1)))+(((phat2)*(1-phat2))/(n2)))
+# 95% Conifidence Intervals
+conf_lo <- round(pdiff - qnorm(0.975) * SE,digits = 3)
+conf_hi <- round(pdiff + qnorm(0.975) * SE,digits = 3)
+
+#Significance
+ppool <- (prop1+prop2) / (n1+n2)
+zscore <- pdiff / sqrt(ppool*(1-ppool)*((1/n1)+(1/n2)))
+# Output
+pvalue <- 2*pnorm(abs(zscore), lower.tail = FALSE)
+ratio <- phat1/phat2
+```
+* phat1 is the proportion of adults who earned a college degree and now report above average income
+* phat2 is the proportion of adults who did not earn a college degree and now report above average income
+* The difference in proportions, phat1 - phat2 is `r round(pdiff,digits = 3)`
+* The confidence interval for the difference in proportions is `r conf_lo` to `r conf_hi`
+* The z-statistic for the hypothesis test is `r round(zscore,digits = 2)`
+* The p-value for the hypothesis test is `r pvalue`
+* The relative-risk of phat1 to phat2 is `r round(ratio,digits = 2)`
+
+
+The z-statistic is very large and the p-value is very small (<0.05). Thus, the null hypothesis of equal proportions is rejected and the difference in proportions between the two groups is statistically significant.
+
+Before drawing final conclusions, the effect size (Cohen's h) and the power are calculated for the completed hypothesis test:
+```{r}
+h <- ES.h(phat1,phat2)
+pwr.2p2n.test(h = h, n1 = n1, n2 = n2)
+```
+The effect size of the results is medium (>0.50) and the power of the test is 100%. 
+
+
+* * *
+
+
+## Conclusions
+
+<i>Research Question:</i>From 1972-2012, does a different proportion of US adults, who reported living with families with below average incomes when they were sixteen, report an above average income today if they earned any college degree than if they did not earn any college degree?
+
+Yes, a statistically significant difference in proportions exists between US adults raised in below average income families and who report having an above average income today if they earned any college degree than if they did not earn any college degree. Specifically, there are 25.5% (± 2.0%) more US adults raised in below average income families who report an above average income today if they earned any college degree than if not. Moreover, US adults raised in below average income families have 3.6 times the chance of having an above average income if they earn any college degree.
+
+Further randomized studies should assess the extent to which education affects one's future income status, especially for those raised in low-income families. These studies should control for the possible confounding variables present in the GSS data. If education is shown to not only be associated with above average income but to cause such positive outcomes, it may stand out as an important social priority for achieving better outcomes for all US adults.    
+
+
+* * *
+
+
+## Appendix A: The code for the function `margin.tbl` and `prop.tbl`
+
+```{r}
+margin.tbl <- function(data, factor.x, factor.y) {
+    library(tidyr)
+    library(dplyr)
+    table <- data %>% 
+        tbl_df %>%
+        group_by_(factor.x, factor.y) %>%  
+        summarize(n = n())
+    table <- spread_(table, names(table)[2], "n") %>%
+        ungroup
+    table[,1] <- as.character(table[[1]])
+    bottom <- colSums(table[,2:length(table)])
+    bottom <- data.frame("Total",as.list(bottom))
+    bottom[,1] <- as.character(bottom[,1])
+    names(bottom) <- names(table)
+    table <- rbind(table, bottom) 
+    side <- rowSums(table[,-1])
+    names(table)[1] <- "Groups"
+    table <- table %>% mutate(Total = side)
+    return(table)
+}
+
+prop.tbl <- function(margin_tbl) {
+ table <- margin_tbl
+ ncol <- ncol(table)
+ for (row in 1:nrow(table)) {
+     for(col in 1:ncol(table)) {
+         if (col == 1) {
+         }
+         else {
+            table[row,col] <- table[row,col]/table[row,ncol] 
+         }
+    }
+     
+ }
+ return(table)
+}
+```
+
+
+
+
+
+
+
+
